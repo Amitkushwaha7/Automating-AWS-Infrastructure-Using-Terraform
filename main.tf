@@ -7,11 +7,9 @@ resource "aws_vpc" "myvpc" {
 }
 
 resource "aws_subnet" "sub1" {
-  vpc_id            = aws_vpc.myvpc.id
-  cidr_block        = "10.0.0.0/24"
-  availability_zone = "us-east-1a"
-  # Specify true to indicate that instances launched into the subnet should
-  # be assigned a public IP address.
+  vpc_id                  = aws_vpc.myvpc.id
+  cidr_block              = var.subnet1_cidr
+  availability_zone       = "${var.aws_region}a"
   map_public_ip_on_launch = true
 
   tags = {
@@ -21,8 +19,8 @@ resource "aws_subnet" "sub1" {
 
 resource "aws_subnet" "sub2" {
   vpc_id                  = aws_vpc.myvpc.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = "us-east-1b"
+  cidr_block              = var.subnet2_cidr
+  availability_zone       = "${var.aws_region}b"
   map_public_ip_on_launch = true
 
   tags = {
@@ -32,6 +30,10 @@ resource "aws_subnet" "sub2" {
 
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.myvpc.id
+
+  tags = {
+    Name = "igw"
+  }
 }
 
 resource "aws_route_table" "RT" {
@@ -40,6 +42,10 @@ resource "aws_route_table" "RT" {
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.igw.id
+  }
+
+  tags = {
+    Name = "RT"
   }
 }
 
@@ -57,21 +63,22 @@ resource "aws_security_group" "websg" {
   name   = "web"
   vpc_id = aws_vpc.myvpc.id
 
-ingress {
-description = "HTPS"
-from_port = 443
-to_port   = 443
-protocol = "tcp"
-cidr_blocks = ["0.0.0.0/0"]
-}
+  ingress {
+    description = "HTTPS"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
   ingress {
-    description = "HTTP form VPC"
+    description = "HTTP"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
   ingress {
     description = "SSH"
     from_port   = 22
@@ -81,12 +88,11 @@ cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-     ipv6_cidr_blocks = ["::/0"]
-
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
   }
 
   tags = {
@@ -95,25 +101,37 @@ cidr_blocks = ["0.0.0.0/0"]
 }
 
 resource "aws_s3_bucket" "example" {
-  bucket = "amit-terraform-2025-project"
+  bucket = var.bucket_name
+
+  tags = {
+    Name = var.bucket_name
+  }
 }
 
 # Create EC2 Instance
 
 resource "aws_instance" "webserver1" {
-  ami                    = "ami-04b4f1a9cf54c11d0"
-  instance_type          = "t2.micro"
+  ami                    = var.ami_id
+  instance_type          = var.instance_type
   vpc_security_group_ids = [aws_security_group.websg.id]
   subnet_id              = aws_subnet.sub1.id
   user_data              = base64encode(file("userdata.sh"))
+
+  tags = {
+    Name = "webserver1"
+  }
 }
 
 resource "aws_instance" "webserver2" {
-  ami                    = "ami-04b4f1a9cf54c11d0"
-  instance_type          = "t2.micro"
+  ami                    = var.ami_id
+  instance_type          = var.instance_type
   vpc_security_group_ids = [aws_security_group.websg.id]
   subnet_id              = aws_subnet.sub2.id
   user_data              = base64encode(file("userdata1.sh"))
+
+  tags = {
+    Name = "webserver2"
+  }
 }
 
 # create Application Load balancer
@@ -126,7 +144,7 @@ resource "aws_lb" "myalb" {
   subnets         = [aws_subnet.sub1.id, aws_subnet.sub2.id]
 
   tags = {
-    Name = "web"
+    Name = "myalb"
   }
 }
 
@@ -137,8 +155,12 @@ resource "aws_lb_target_group" "tg" {
   vpc_id   = aws_vpc.myvpc.id
 
   health_check {
-    path = "/health"
+    path = "/"
     port = "traffic-port"
+  }
+
+  tags = {
+    Name = "myTG"
   }
 }
 
@@ -167,4 +189,12 @@ resource "aws_lb_listener" "listener" {
 
 output "loadbalancerdns" {
   value = aws_lb.myalb.dns_name
+}
+
+output "webserver1_public_ip" {
+  value = aws_instance.webserver1.public_ip
+}
+
+output "webserver2_public_ip" {
+  value = aws_instance.webserver2.public_ip
 }
